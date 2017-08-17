@@ -1,5 +1,6 @@
 #include "MqAdmin.h"  
-
+using namespace zbus;
+using namespace std;
 
 int main_MqAdmin(int argc, char* argv[]) {  
 	Logger::configDefaultLogger(0, LOG_INFO); 
@@ -8,7 +9,7 @@ int main_MqAdmin(int argc, char* argv[]) {
 
 	Broker broker("localhost:15555");
 	MqAdmin admin(&broker);
-	std::vector<ServerInfo> res = admin.queryServer();
+	vector<ServerInfo> res = admin.queryServer();
 
 	string topic = "CPP_Topic";
 	admin.declareTopic(topic); 

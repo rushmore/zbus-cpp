@@ -1,5 +1,7 @@
 #include "Producer.h"  
 
+using namespace zbus;
+using namespace std;
 
 int main_Producer(int argc, char* argv[]) {  
 	Logger::configDefaultLogger(0, LOG_INFO); 
@@ -8,7 +10,7 @@ int main_Producer(int argc, char* argv[]) {
 
 	Broker broker("localhost:15555");
 	Producer p(&broker);
-	std::vector<ServerInfo> res = p.queryServer();
+	vector<ServerInfo> res = p.queryServer();
 
 	string topic = "CPP_Topic";
 	p.declareTopic(topic);  

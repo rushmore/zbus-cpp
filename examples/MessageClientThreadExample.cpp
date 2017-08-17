@@ -1,13 +1,14 @@
 #include "MqClient.h" 
 
-
+using namespace zbus;
+using namespace std;
 
 int main_MessageClientThread(int argc, char* argv[]) {  
 	Logger::configDefaultLogger(0, LOG_INFO);
 
 	MessageClient client("localhost:15555");
 	
-	client.onMessage = [](Message* msg, void* ctx) {
+	client.onMessage = [](Message* msg) {
 		msg->print();
 		delete msg;
 	};

@@ -1,7 +1,12 @@
 #include "RpcProcessor.h"
 #include "Consumer.h"
- 
+#include <vector>
 
+
+using namespace zbus;
+using namespace std;
+
+//businesss object
 class MyService {
 public:
 	int plus(int a, int b) {
@@ -9,51 +14,45 @@ public:
 	}
 	std::string getString(std::string str) {
 		return str;
-	} 
-};
-
-class MyRpcProcessor : public RpcProcessor {
-private:
-	MyService* svc;
-
-public:
-	MyRpcProcessor(MyService* svc) {
-		this->svc = svc;
-	}
-
-	virtual void process(Request* req, Response* res) { 
-		if (req->method == "plus") {
-			int a = stoi(req->params[0].asString());
-			int b = stoi(req->params[1].asString());
-			int c = svc->plus(a, b);
-			res->result = Json::Value(c);
-			return;
-		}
-
-		if (req->method == "getString") {
-			std::string s = req->params[0].asString();
-			s = svc->getString(s);
-			res->result = Json::Value(s);
-			return;
-		}
-
-		res->error = Json::Value("Missing method: " + req->method);
 	}
 };
+ 
+
+//NO reflection in C++, you need to wrap in this way, ugly? 
+void registerMethods(RpcProcessor& p, MyService* svc) {
+	
+	p.addMethod("plus", [svc](vector<Json::Value>& params) { 
+		int a = stoi(params[0].asString());
+		int b = stoi(params[1].asString());
+		int c = svc->plus(a, b);
+		return Json::Value(c);
+	});
 
 
+	p.addMethod("getString", [svc](vector<Json::Value>& params) { 
+		std::string str = params[0].asString();
+		std::string res = svc->getString(str);
+		return Json::Value(res);
+	});
+}
 
-int main_RpcProcessor(int argc, char* argv[]) {  
-	Logger::configDefaultLogger(0, LOG_INFO);  
 
+int main(int argc, char* argv[]) {
+	Logger::configDefaultLogger(0, LOG_DEBUG); 
 	MyService svc;
-	MyRpcProcessor rpcProcessor(&svc);
+	
+	RpcProcessor p;            //You may configure thread pool size
+	//p.modulePrefix;          //You may also configure on the default method prefix(module)
+	registerMethods(p, &svc);  
 
+	Broker broker("localhost:15555;localhost:15556");
+	Consumer c(&broker, "MyRpc");  
 
-	Broker broker("localhost:15555");
-	Consumer c(&broker, "MyRpc"); 
-	c.contextObject = &rpcProcessor; //RpcMessageHandler need this context, C++ enclosure issue
-	c.messageHander = RpcMessageHandler;
+	c.messageHander = [&p](Message* msg, MqClient* client) {
+		p.handleAsync(msg, client);
+	};
+
+	c.connectionCount = 4;
 	c.start();  
 
 	broker.join();

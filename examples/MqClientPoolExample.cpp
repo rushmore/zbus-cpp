@@ -1,5 +1,6 @@
 #include "MqClient.h"  
-
+using namespace zbus;
+using namespace std;
 
 int main_MqClientPool(int argc, char* argv[]) {  
 	Logger::configDefaultLogger(0, LOG_DEBUG); 

@@ -96,6 +96,9 @@
     <ClInclude Include="RpcProcessor.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="ThreadPool.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\deps\jsoncpp\src\lib_json\json_reader.cpp">
@@ -106,9 +109,6 @@
     </ClCompile>
     <ClCompile Include="..\deps\jsoncpp\src\lib_json\json_writer.cpp">
       <Filter>Source Files\jsoncpp</Filter>
-    </ClCompile>
-    <ClCompile Include="Kit.cpp">
-      <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

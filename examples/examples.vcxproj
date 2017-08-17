@@ -18,6 +18,22 @@
       <Platform>x64</Platform>
     </ProjectConfiguration>
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="BrokerExample.cpp" />
+    <ClCompile Include="ConsumerExample.cpp" />
+    <ClCompile Include="ConsumeThreadExample.cpp" />
+    <ClCompile Include="MessageClientExample.cpp" />
+    <ClCompile Include="MessageClientThreadExample.cpp" />
+    <ClCompile Include="MqAdminExample.cpp" />
+    <ClCompile Include="MqClientConsumeExample.cpp" />
+    <ClCompile Include="MqClientExample.cpp" />
+    <ClCompile Include="MqClientNetTest.cpp" />
+    <ClCompile Include="MqClientPoolExample.cpp" />
+    <ClCompile Include="ProducerExample.cpp" />
+    <ClCompile Include="RpcInvokerExample.cpp" />
+    <ClCompile Include="RpcProcessorExample.cpp" />
+    <ClCompile Include="ThreadPoolExample.cpp" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{D127ACED-9103-41A3-9876-A2DF3DB4B3E4}</ProjectGuid>
     <RootNamespace>examples</RootNamespace>
@@ -156,20 +172,6 @@
       <AdditionalDependencies>Ws2_32.lib;zbus.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
-  <ItemGroup>
-    <ClCompile Include="BrokerExample.cpp" />
-    <ClCompile Include="ConsumerExample.cpp" />
-    <ClCompile Include="ConsumeThreadExample.cpp" />
-    <ClCompile Include="MessageClientExample.cpp" />
-    <ClCompile Include="MessageClientThreadExample.cpp" />
-    <ClCompile Include="MqAdminExample.cpp" />
-    <ClCompile Include="MqClientExample.cpp" />
-    <ClCompile Include="MqClientPoolExample.cpp" />
-    <ClCompile Include="ProducerExample.cpp" />
-    <ClCompile Include="RpcInvokerExample.cpp" />
-    <ClCompile Include="RpcProcessorAsyncExample.cpp" />
-    <ClCompile Include="RpcProcessorExample.cpp" />
-  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

@@ -1,18 +1,18 @@
 #include "MqClient.h"  
-
+using namespace zbus;
+using namespace std;
 
 
 int main_MqClient(int argc, char* argv[]) {  
 	Logger::configDefaultLogger(0, LOG_INFO); 
 	Logger* log = Logger::getLogger();
 
-	MqClient client("localhost:15555");
-	client.connect();
+	MqClient client("localhost:15555"); 
 	 
 	TrackerInfo info = client.queryTracker();
 	log->info("%s", info.serverAddress.address.c_str());
 
-	string topic = "CPP_Topic";
+	std::string topic = "CPP_Topic";
 	client.declareTopic(topic);
 
 	TopicInfo topicInfo = client.queryTopic(topic); 

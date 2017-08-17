@@ -6,7 +6,10 @@
 #include "Logger.h"
 #include "Buffer.h"
 
-using namespace std;
+#include <thread>
+#include <condition_variable>
+#include <mutex> 
+#include <chrono> 
 
 #if defined(_MSC_VER) && _MSC_VER >= 1400 // VC++ 8.0
 // Disable warning about strdup being deprecated.
@@ -278,288 +281,368 @@ inline static int net_send(int fd, const unsigned char *buf, size_t len){
 #endif 
 }
 
+//////////////////////////////////////////////////////////////////////////////////////////
+namespace zbus {
 
-
-class ZBUS_API MessageClient { 
-public:    
-	MessageClient(string address, bool sslEnabled = false, string sslCertFile = "") :
-		address(address),
-		sslEnabed(sslEnabed),
-		sslCertFile(sslCertFile),
-		socket(-1)
-	{
-		logger = Logger::getLogger();
-		readBuffer = new ByteBuffer();
-	}
-
-	virtual ~MessageClient() {
-		this->close(true);
-	}
-	
-	void connect() {
-		if (this->socket != -1) {
-			return; //already
+	struct TimerKiller {
+		bool waitFor(std::chrono::milliseconds const& time) {
+			std::unique_lock<std::mutex> lock(m);
+			return !cv.wait_for(lock, time, [&] {return terminate; });
 		}
-		{
-			std::unique_lock<std::mutex> lock(mutex); 
-			if (this->socket != -1) return;
+		void kill() {
+			std::unique_lock<std::mutex> lock(m);
+			terminate = true;
+			cv.notify_all();
+		}
+	private:
+		std::condition_variable cv;
+		std::mutex m;
+		bool terminate = false;
+	};
 
-			resetReadBuffer();
-			string address = this->address;
-			size_t pos = address.find(':');
-			int port = 80;
-			char* host = (char*)address.substr(0, pos).c_str();
-			if (pos != -1) {
-				port = atoi(address.substr(pos + 1).c_str());
+
+	class ZBUS_API MessageClient {
+	public:
+		ServerAddress serverAddress;
+
+		MessageClient(std::string address, bool sslEnabled = false, std::string sslCertFile = "") :
+			address(address),
+			sslEnabed(sslEnabed),
+			sslCertFile(sslCertFile),
+			socket(-1)
+		{
+			serverAddress.address = address;
+			serverAddress.sslEnabled = sslEnabed;
+
+			logger = Logger::getLogger();
+			readBuffer = new ByteBuffer();
+			this->processTimer = NULL;
+			this->heartbeatTimer = NULL;
+
+			this->startHeartbeat();
+		}
+
+		virtual ~MessageClient() {
+			this->close(); 
+		}
+
+		bool active() {
+			return this->socket > 0;
+		}
+
+		void connect() {
+			if (active()) {
+				return; //already
 			}
-			if (logger->isDebugEnabled()) {
-				logger->debug("Trying connect to (%s)", address.c_str());
+			{
+				std::unique_lock<std::mutex> lock(connectMutex);
+				if (this->socket != -1) return;
+
+				resetReadBuffer();
+				std::string address = this->address;
+				size_t pos = address.find(':');
+				int port = 80;
+				char* host = (char*)address.substr(0, pos).c_str();
+				if (pos != -1) {
+					port = atoi(address.substr(pos + 1).c_str());
+				}
+				if (logger->isDebugEnabled()) {
+					logger->debug("Trying connect to (%s)", address.c_str());
+				}
+				int ret = net_connect(&this->socket, host, port);
+				if (ret != 0) {
+					std::string errMsg = errorMessage(ret);
+					if (ret == ERR_NET_CONNECT_FAILED) {
+						char msg[1024];
+						sprintf(msg, "Connection to(%s) failed", address.c_str());
+						errMsg = msg;
+					} 
+					throw MqException(errMsg, ret);
+				}
+				if (ret == 0) {
+					if (logger->isDebugEnabled()) {
+						logger->debug("Connected to (%s)", address.c_str());
+					}
+				}
 			}
-			int ret = net_connect(&this->socket, host, port);
-			if (ret != 0) {
-				string errMsg = errorMessage(ret);
+			if (onConnected) {
+				onConnected(this);
+			}
+		}
+
+		Message* invoke(Message& msg, int timeout = 3000) {
+			connect();
+			send(msg, timeout);
+			std::string msgid = msg.getId();
+			return recv(msgid.c_str(), timeout);
+		}
+
+		void send(Message& msg, int timeout = 3000) {
+			connect();
+			std::unique_lock<std::mutex> lock(writeMutex);
+			sendUnsafe(msg, timeout);
+		}
+
+		Message* recv(const char* msgid = NULL, int timeout = 3000) {
+			connect();
+			std::unique_lock<std::mutex> lock(readMutex);
+			return recvUnsafe(msgid, timeout);
+		}
+
+		void start(int timeout = 60000) { 
+			if (processThread) return;
+			processThread = new std::thread(&MessageClient::processMessage, this, timeout);
+		} 
+
+		void join() {
+			if (processThread) {
+				processThread->join();
+			}
+		}
+
+		void close() {
+			autoConnect = false;
+			termintated = true;
+
+			this->closeSocket();
+
+			if (this->processTimer) {
+				this->processTimer->kill();
+			} 
+			if (this->heartbeatTimer) {
+				this->heartbeatTimer->kill();
+			} 
+
+			if (this->processThread != NULL) {
+				this->processThread->join();
+				delete this->processThread;
+				this->processThread = NULL;
+			}
+
+			if (this->heartbeatThread != NULL) {
+				this->heartbeatThread->join(); 
+				delete this->heartbeatThread;
+				this->heartbeatThread = NULL;
+			} 
+		}
+
+	private:
+		void startHeartbeat() {
+			if (heartbeatThread != NULL) return;
+			heartbeatThread = new std::thread(&MessageClient::heartbeat, this);
+		}
+
+		void closeSocket() {
+			if (socket != -1) {
+				net_close(socket);
+				socket = -1;
+			}
+			for (auto &kv : msgTable) {
+				delete kv.second;
+			}
+			msgTable.clear();
+
+			if (readBuffer) {
+				//delete readBuffer;
+				//readBuffer = NULL;  //TODO
+			}
+		}
+
+		void sendUnsafe(Message& msg, int timeout = 3000) {
+			int ret = net_set_timeout(this->socket, timeout);
+			if (ret < 0) {
+				std::string errMsg = errorMessage(ret);
 				throw MqException(errMsg, ret);
 			}
-			if (ret == 0) {
-				if (logger->isDebugEnabled()) {
-					logger->debug("Connected to (%s)", address.c_str());
-				}
-			}  
-		}
-		if (onConnected) {
-			onConnected(this);
-		}
-	}
 
-	Message* invoke(Message& msg, int timeout = 3000) {
-		connect();
-		std::unique_lock<std::mutex> lock(mutex);
-		sendUnsafe(msg, timeout);
-		string msgid = msg.getId();
-		return recvUnsafe(msgid.c_str(), timeout);
-	}
-
-	void send(Message& msg, int timeout = 3000) {
-		connect();
-		std::unique_lock<std::mutex> lock(mutex);
-		sendUnsafe(msg, timeout);
-	}
-
-	Message* recv(const char* msgid = NULL, int timeout = 3000) {
-		connect();
-		std::unique_lock<std::mutex> lock(mutex);
-		return recvUnsafe(msgid, timeout);
-	}
-
-	void start(int timeout=10000) {
-		std::unique_lock<std::mutex> lock(processMutex);
-		if (processThread != NULL) return;
-		processThread = new std::thread(&MessageClient::processMessage, this, timeout);
-	}
-
-	void join() {
-		if (processThread) {
-			processThread->join();
-		}
-	}
-
-	void close(bool stopThread=true) {
-		if (stopThread) {
-			autoConnect = false;
-		}
-		if (socket != -1) {
-			net_close(socket);
-			socket = -1;
-		}
-		for (auto &kv : msgTable) {
-			delete kv.second;
-		}
-		msgTable.clear();
-
-		if (readBuffer) {
-			delete readBuffer;
-			readBuffer = NULL;
-		}
-
-		if (stopThread && this->processThread) { 
-			this->processThread->join();
-			delete this->processThread;
-			this->processThread = NULL;
-		}
-	}
-
-private:
-	void processMessage(int timeout=10000) {
-		while (true) {
-			try {
-				Message* msg = recv(NULL, timeout); 
-
-				if (onMessage) {
-					onMessage(msg, this->contextObject);
-				} else {
-					delete msg;
-				} 
+			if (msg.getId() == "") {
+				char uuid[256];
+				gen_uuid(uuid, sizeof(uuid));
+				msg.setId(uuid);
 			}
-			catch (MqException& e) {
-				if (!autoConnect) break;  
+			ByteBuffer buf;
+			msg.encode(buf);
+			buf.flip();
 
-				if (e.code == ERR_NET_RECV_FAILED) { //timeout?
+			int sent = 0, total = buf.remaining();
+			unsigned char* start = (unsigned char*)buf.begin();
+			while (sent < total) {
+				int ret = net_send(this->socket, start, total - sent);
+				if (ret < 0) {
+					std::string errMsg = errorMessage(ret);
+					throw MqException(errMsg, ret);
+				}
+				sent += ret;
+				start += ret;
+			}
+			//if (logger->isDebugEnabled()) logger->debug((void*)buf.begin(), buf.remaining()); 
+		}
+
+
+		Message* recvUnsafe(const char* msgid = NULL, int timeout = 3000) {
+			if (msgid) { 
+				auto iter = msgTable.find(msgid); //test on 'msgTable[msgid]==NULL' will cause memmory leak!!!!
+				if (iter != msgTable.end()) {
+					msgTable.erase(std::string(msgid));
+					return iter->second;
+				}
+			}
+
+			int rc = net_set_timeout(this->socket, timeout);
+			if (rc < 0) {
+				std::string errMsg = errorMessage(rc);
+				throw MqException(errMsg, rc);
+			}
+			//if (logger->isDebugEnabled()) logger->logHead(LOG_DEBUG); 
+			while (true) {
+				unsigned char data[10240];
+				int n = net_recv(this->socket, data, sizeof(data));
+				if (n <= 0) {
+					rc = n;
+					std::string errMsg = errorMessage(rc);
+					throw MqException(errMsg, rc);
+				}
+				readBuffer->put((void*)data, n);
+				//if (logger->isDebugEnabled()) logger->logBody((void*)data, n, LOG_DEBUG); 
+
+				ByteBuffer buf(readBuffer); //duplicate, no copy of data
+				buf.flip();
+
+				Message* msg = Message::decode(buf);
+				if (msg == NULL) {
 					continue;
 				}
 
-				logger->error("%d, %s", e.code, e.message.c_str());
-				close(false); //no stop of thread
-				if (this->onDisconnected) {
-					this->onDisconnected();
+				ByteBuffer* newBuf = new ByteBuffer(buf.begin(), buf.remaining());
+				delete this->readBuffer;
+				this->readBuffer = newBuf;
+
+				if (msgid == NULL || msg->getId() == msgid) {
+					return msg;
 				}
-				std::this_thread::sleep_for(std::chrono::seconds(3)); 
-			} 
-		}
-	}
-	void sendUnsafe(Message& msg, int timeout=3000) {
-		int ret = net_set_timeout(this->socket, timeout);
-		if (ret < 0) {
-			string errMsg = errorMessage(ret);
-			throw MqException(errMsg, ret);
-		}
-
-		if (msg.getId() == "") {
-			char uuid[256];
-			gen_uuid(uuid, sizeof(uuid));
-			msg.setId(uuid);
-		}
-		ByteBuffer buf;
-		msg.encode(buf);
-		buf.flip();
-
-		int sent = 0, total = buf.remaining();
-		unsigned char* start = (unsigned char*)buf.begin();
-		while (sent < total) {
-			int ret = net_send(this->socket, start, total - sent);
-			if (ret < 0) {  
-				string errMsg = errorMessage(ret);
-				throw MqException(errMsg, ret); 
-			}
-			sent += ret;
-			start += ret;
-		}
-		if (logger->isDebugEnabled()) {
-			logger->debug((void*)buf.begin(), buf.remaining());
-		} 
-	}
-
-
-	Message* recvUnsafe(const char* msgid = NULL, int timeout = 3000) {
-		if (msgid) {
-			Message* res = msgTable[msgid];
-			if (res) {
-				msgTable.erase(string(msgid));
-				return res;
+				msgTable[msgid] = msg;
 			}
 		}
 
-		int rc = net_set_timeout(this->socket, timeout);
-		if (rc < 0) {
-			string errMsg = errorMessage(rc);
-			throw MqException(errMsg, rc);
-		}
-		if (logger->isDebugEnabled()) {
-			logger->logHead(LOG_DEBUG);
-		}
-		while (true) {
-			unsigned char data[10240];
-			int n = net_recv(this->socket, data, sizeof(data));
-			if (n < 0) {
-				rc = n;
-				string errMsg = errorMessage(rc);
-				throw MqException(errMsg, rc);
+
+		void processMessage(int timeout = 60000) {
+			while (!this->termintated) {
+				try {
+					Message* msg = recv(NULL, timeout);
+
+					if (onMessage) {
+						onMessage(msg);
+					}
+					else {
+						delete msg;
+					}
+				}
+				catch (MqException& e) {
+					if (!autoConnect) break;
+
+					if (e.code == ERR_NET_RECV_FAILED) { //timeout?
+						continue;
+					}
+
+					logger->error("%d, %s", e.code, e.message.c_str());
+					this->closeSocket(); //no stop of thread
+					if (this->onDisconnected) {
+						this->onDisconnected();
+					}
+					if (this->processTimer != NULL) {
+						delete this->processTimer;
+					}
+					this->processTimer = new TimerKiller();
+					this->processTimer->waitFor(std::chrono::milliseconds(reconnectInterval));
+				}
 			}
-			readBuffer->put((void*)data, n);
-			if (logger->isDebugEnabled()) {
-				logger->logBody((void*)data, n, LOG_DEBUG);
+		}
+
+		void heartbeat() { 
+			while (!this->termintated) { 
+				if (this->heartbeatTimer != NULL) {
+					delete this->heartbeatTimer;
+				}
+				this->heartbeatTimer = new TimerKiller();
+				this->heartbeatTimer->waitFor(std::chrono::milliseconds(heartbeatInterval)); 
+				try {
+					if (!this->active()) continue;
+					Message msg;
+					msg.setCmd(PROTOCOL_HEARTBEAT);
+					this->send(msg);
+				}
+				catch (MqException& e) {
+					//ignore
+				}
 			}
+		}
 
-			ByteBuffer buf(readBuffer); //duplicate, no copy of data
-			buf.flip();
+	private:
+		Logger* logger;
 
-			Message* msg = Message::decode(buf);
-			if (msg == NULL) {
-				continue;
+		int socket;
+		std::string address;
+		bool sslEnabed;
+
+		std::string sslCertFile;
+		std::map<std::string, Message*> msgTable;
+		ByteBuffer* readBuffer;
+		mutable std::mutex connectMutex;
+		mutable std::mutex readMutex;
+		mutable std::mutex writeMutex; 
+
+	public:  
+		std::function<void(MessageClient*)> onConnected;
+		std::function<void()> onDisconnected;
+		std::function<void(Message*)> onMessage;
+		 
+		int reconnectInterval = 3000; //3s, in milliseconds
+		int heartbeatInterval = 60000; //60s, in milliseconds
+
+	private:
+		bool autoConnect = true;
+		bool termintated = false; 
+		std::thread* processThread;
+		std::thread* heartbeatThread;
+		TimerKiller* processTimer = NULL;
+		TimerKiller* heartbeatTimer = NULL;
+
+	private:
+		void resetReadBuffer() {
+			if (readBuffer) {
+				delete readBuffer;
 			}
+			readBuffer = new ByteBuffer();
+		}
 
-			ByteBuffer* newBuf = new ByteBuffer(buf.begin(), buf.remaining());
-			delete this->readBuffer;
-			this->readBuffer = newBuf;
-
-			if (msgid == NULL || msg->getId() == msgid) {
-				return msg;
+	public:
+		inline static std::string errorMessage(int code) {
+			std::map<int, std::string>& table = NetErrorTable();
+			std::string res = table[code];
+			if (res == "") {
+				res = "Unknown error";
 			}
-			msgTable[msgid] = msg;
+			return res;
 		}
-	}
-
-private:
-	Logger* logger;
-private:
-	int socket;
-
-	string address;
-	bool sslEnabed;
-
-	string sslCertFile;
-	map<string, Message*> msgTable; 
-	ByteBuffer* readBuffer;
-	mutable std::mutex mutex;
-
-public:
-	typedef void(*ConnectedHandler)(MessageClient* client);
-	typedef void(*DisconnectedHandler)();
-	typedef void(*MessageHandler)(Message*, void*); //message need to be deleted in handler
-
-	ConnectedHandler onConnected;
-	DisconnectedHandler onDisconnected;
-	MessageHandler onMessage;
-
-	void* contextObject;
-private:
-	bool autoConnect = true;
-	std::thread* processThread;
-	mutable std::mutex processMutex;
-
-private:
-	void resetReadBuffer() {
-		if (readBuffer) {
-			delete readBuffer;
+		inline static std::map<int, std::string>& NetErrorTable() {
+			static bool init = false;
+			static std::map<int, std::string> table;
+			if (!init) {
+				init = true;
+				table[ERR_NET_UNKNOWN_HOST] = "Failed to get an IP address for the given hostname";
+				table[ERR_NET_SOCKET_FAILED] = "Failed to open a socket";
+				table[ERR_NET_CONNECT_FAILED] = "The connection to the given server / port failed";
+				table[ERR_NET_RECV_FAILED] = "Reading information from the socket failed";
+				table[ERR_NET_SEND_FAILED] = "Sending information through the socket failed";
+				table[ERR_NET_CONN_RESET] = "Connection was reset by peer";
+				table[ERR_NET_WANT_READ] = "Connection requires a read call";
+				table[ERR_NET_WANT_WRITE] = "Connection requires a write call";
+			}
+			return table;
 		}
-		readBuffer = new ByteBuffer();
-	}
 
-public:
-	inline static string errorMessage(int code) {
-		map<int, string>& table = NetErrorTable();
-		string res = table[code];
-		if (res == "") {
-			res = "Unknown error";
-		}
-		return res;
-	}
-	inline static map<int, string>& NetErrorTable() {
-		static bool init = false;
-		static map<int, string> table;
-		if (!init) {
-			init = true;
-			table[ERR_NET_UNKNOWN_HOST] = "Failed to get an IP address for the given hostname";
-			table[ERR_NET_SOCKET_FAILED] = "Failed to open a socket";
-			table[ERR_NET_CONNECT_FAILED] = "The connection to the given server / port failed"; 
-			table[ERR_NET_RECV_FAILED] = "Reading information from the socket failed";
-			table[ERR_NET_SEND_FAILED] = "Sending information through the socket failed";
-			table[ERR_NET_CONN_RESET] = "Connection was reset by peer";
-			table[ERR_NET_WANT_READ] = "Connection requires a read call";
-			table[ERR_NET_WANT_WRITE] = "Connection requires a write call"; 
-		}
-		return table;
-	}
-	
-};
+	};
+
+}//namespace
 
 #endif

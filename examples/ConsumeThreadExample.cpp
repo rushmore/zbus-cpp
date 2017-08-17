@@ -1,5 +1,6 @@
 #include "Consumer.h"  
-
+using namespace zbus;
+using namespace std;
 
 int main_ConsumeThread(int argc, char* argv[]) {  
 	Logger::configDefaultLogger(0, LOG_INFO);  
@@ -10,12 +11,12 @@ int main_ConsumeThread(int argc, char* argv[]) {
 	ct.topic = "MyTopic"; 
 	ct.connectionCount = 1;
 	
-	ct.messageHander = [](Message* msg, MqClient* client, void* ctx) {
+	ct.messageHander = [](Message* msg, MqClient* client) {
 		msg->print();
 		delete msg;
 	};
 	ct.start();
 
-	system("pause");
+	ct.join();
 	return 0;
 }

@@ -1,41 +1,98 @@
 #ifndef __ZBUS_RPC_PROCESSOR_H__
 #define __ZBUS_RPC_PROCESSOR_H__  
  
-#include "RpcInvoker.h" 
+#include "RpcInvoker.h"
+#include "ThreadPool.h"
 
-class ZBUS_API RpcProcessor { 
-public: 
-	virtual void process(Request* req, Response* res) = 0;
-	
-	virtual void handle(Message* reqMsg, MqClient* client) {
-		Message* resMsg = new Message();
-		resMsg->setId(reqMsg->getId());
-		resMsg->setTopic(reqMsg->getTopic());
-		resMsg->setRecver(reqMsg->getSender());
+#include <map>
+#include <mutex> 
 
-		Request req; 
-		Response res;
-		std::string body = reqMsg->getBodyString();
-		req.fromJson(body);
-		delete reqMsg;
+namespace zbus {
 
-		try {
-			process(&req, &res);
+	typedef std::function<Json::Value(std::vector<Json::Value>&)> Method;
+
+	class ZBUS_API RpcProcessor { 
+	public:
+		std::vector<std::string> modulePrefix;
+		ThreadPool threadPool;
+		RpcProcessor(int threadPoolSize = 1) :threadPool(threadPoolSize) {
+
 		}
-		catch (std::exception& e) {
-			res.error = Json::Value(e.what());
+	public: 
+		void addMethod(std::string methodName, Method method, std::string module="") {
+			std::unique_lock<std::mutex> lock(methodMutex); 
+			if (module != "") { 
+				this->methodTable[module + "." + methodName] = method;
+				return;
+			} 
+
+			this->methodTable[methodName] = method;
+			for (auto prefix : modulePrefix) {
+				std::string module = prefix + "." + methodName;
+				this->methodTable[module] = method;
+			}
+		}  
+
+		void handleAsync(Message* reqMsg, MqClient* client) {
+			threadPool.submit([this, reqMsg, client]() {
+				this->handle(reqMsg, client);
+			});
 		}
-		resMsg->setJsonBody(res.toJson());
 
-		client->route(*resMsg);
-		delete resMsg;
-	} 
-};  
+		virtual void handle(Message* reqMsg, MqClient* client) {
+			Message* resMsg = new Message();
+			resMsg->setId(reqMsg->getId());
+			resMsg->setTopic(reqMsg->getTopic());
+			resMsg->setRecver(reqMsg->getSender());
 
-ZBUS_API inline void RpcMessageHandler(Message* msg, MqClient* client, void* ctx) {
-	RpcProcessor* p = (RpcProcessor*)ctx;
-	p->handle(msg, client);
-};
+			Request req;
+			Response res;
+			std::string body = reqMsg->getBodyString();
+			req.fromJson(body);
+			delete reqMsg;
 
+			try {
+				process(&req, &res);
+			}
+			catch (std::exception& e) {
+				res.error = Json::Value(e.what());
+			}
+			resMsg->setJsonBody(res.toJson());
 
+			client->route(*resMsg);
+			delete resMsg;
+		} 
+
+		virtual void process(Request* req, Response* res) { 
+			Method m = findMethod(req);
+			if (m == NULL) {
+				res->error = Json::Value("Missing method: " + req->method);
+				return;
+			} 
+			try {
+				res->result = m(req->params);
+			}
+			catch (std::exception& e) {
+				res->error = Json::Value(e.what());
+			}
+		}
+
+		virtual Method findMethod(Request* req) { 
+			std::unique_lock<std::mutex> lock(methodMutex);
+			std::string fullName = req->method;
+			if (req->module != "") {
+				fullName += "." + req->method;
+			}
+			auto iter = methodTable.find(fullName);
+			if (iter != methodTable.end()) { 
+				return iter->second;
+			} 
+			return NULL; 
+		}
+	private:
+		std::map<std::string, Method> methodTable;
+		mutable std::mutex methodMutex; 
+	}; 
+
+}
 #endif

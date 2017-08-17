@@ -15,25 +15,10 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="MqClientExample.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="MessageClientExample.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="MqClientPoolExample.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="BrokerExample.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="MessageClientThreadExample.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="MqAdminExample.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="ProducerExample.cpp">
+    <ClCompile Include="MessageClientExample.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="ConsumerExample.cpp">
@@ -42,13 +27,34 @@
     <ClCompile Include="ConsumeThreadExample.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="MessageClientThreadExample.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MqAdminExample.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MqClientConsumeExample.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MqClientExample.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MqClientNetTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MqClientPoolExample.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ProducerExample.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="RpcInvokerExample.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="RpcProcessorExample.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="RpcProcessorAsyncExample.cpp">
+    <ClCompile Include="ThreadPoolExample.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
