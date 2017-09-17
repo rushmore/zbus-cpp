@@ -15,16 +15,19 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="BrokerExample.cpp">
+    <ClCompile Include="RpcProcessorExample.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="MessageClientExample.cpp">
+    <ClCompile Include="BrokerExample.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="ConsumerExample.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="ConsumeThreadExample.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MessageClientExample.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="MessageClientThreadExample.cpp">
@@ -49,9 +52,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="RpcInvokerExample.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="RpcProcessorExample.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="ThreadPoolExample.cpp">

@@ -38,7 +38,7 @@ void registerMethods(RpcProcessor& p, MyService* svc) {
 
 
 int main(int argc, char* argv[]) {
-	Logger::configDefaultLogger(0, LOG_DEBUG); 
+	Logger::configDefaultLogger(NULL, LOG_DEBUG); 
 	MyService svc;
 	
 	RpcProcessor p;            //You may configure thread pool size
@@ -47,6 +47,7 @@ int main(int argc, char* argv[]) {
 
 	Broker broker("localhost:15555;localhost:15556");
 	Consumer c(&broker, "MyRpc");  
+	c.topicMask = PROTOCOL_MASK_MEMORY | PROTOCOL_MASK_RPC;
 
 	c.messageHander = [&p](Message* msg, MqClient* client) {
 		p.handleAsync(msg, client);

@@ -59,11 +59,13 @@
 
 //Security 
 #define PROTOCOL_TOKEN "token"
-
-#define PROTOCOL_MASK_PAUSE           (1 << 0)
-#define PROTOCOL_MASK_RPC             (1 << 1)
-#define PROTOCOL_MASK_EXCLUSIVE       (1 << 2)
-#define PROTOCOL_MASK_DELETE_ON_EXIT  (1 << 3)
+ 
+#define PROTOCOL_MASK_MEMORY  (1 << 0)
+#define PROTOCOL_MASK_RPC (1 << 1)
+#define PROTOCOL_MASK_PROXY (1 << 2)
+#define PROTOCOL_MASK_PAUSE (1 << 3)
+#define PROTOCOL_MASK_EXCLUSIVE (1 << 4)
+#define PROTOCOL_MASK_DELETE_ON_EXIT (1 << 5)
 
 #define PROTOCOL_HEARTBEAT "heartbeat"
 
